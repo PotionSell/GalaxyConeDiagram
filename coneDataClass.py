@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Mar  1 19:40:58 2019
+Created on Thu Mar  7 15:15:32 2019
 
 @author: bscousin
-BACKUP BEFORE I RETOOLED A LOT OF THE PLOTTING FUNCTIONS AND HOW REDSHIFT
-WINDOW RADII ARE HANDLED. THIS VERSION HAS CORRECT NN COMPUTATIONS, BUT IS A
-BIT MESSY. NEXT VERSION IS CLEANER.
 """
+
 
 
 import pandas as pd
@@ -26,7 +24,7 @@ from scipy.spatial import cKDTree
 
 from os.path import splitext, join
 
-
+savepath = '/home/bscousin/code/figures'
 
 def transformRadius(r, rMin, rMax):
     '''
@@ -256,9 +254,9 @@ class coneData():
 
         colors = ['k','g','b','r']
         markers = ['o','*','*','*']
-        sizes = [1,8,8,8]
+        sizes = [2,8,8,8]
 
-        fig = plt.figure()
+        fig = plt.figure(figsize=(12,13))
         ax = fig.add_subplot(111, projection='polar')
 
         for i in range(self.numDatasets):
@@ -272,7 +270,7 @@ class coneData():
             else:
                 raise ValueError('Specify a valid coordinate for theta (RA or DEC)')
 
-            ax.scatter(thetaRad,Zs, c=colors[i], marker=markers[i], s = sizes[i])
+            ax.scatter(thetaRad,Zs, c=colors[i], marker=markers[i], s = sizes[i],edgecolors='k',linewidths=0.1)
             #note: this is NOT plotting each point individually; this plots
             #each dataset individually
 
@@ -303,8 +301,11 @@ class coneData():
         ax.set_thetamin(np.rad2deg(tMin))
         ax.set_thetamax(np.rad2deg(tMax))
 
-        ax.set_xlabel('redshift',size=14)
-        ax.set_ylabel(thetaVal,size=14)
+        ax.set_xlabel('redshift', rotation=tMin,size=14)
+
+        rPos = transformRadius(zMax,zMin,zMax)
+
+        ax.set_ylabel(thetaVal, rotation=tMin-90,size=14)
 
         ax.tick_params('both',labelsize=10.25)
         #ax.xaxis.grid(False)
@@ -312,7 +313,7 @@ class coneData():
         return ax
 
 
-    def plotWedge(self,thetaVal,Zmin=0,Zmax=2,dTheta=2):
+    def plotWedge(self,thetaVal,radii=[0,2],dTheta=2):
 
         if thetaVal == 'RA':
             center = self.fieldCenter[0]
@@ -323,15 +324,15 @@ class coneData():
         minTheta = np.deg2rad( center - dTheta )
         maxTheta = np.deg2rad( center + dTheta )
 
-        sector = sectorClass([Zmin,Zmax],[minTheta,maxTheta])
+        sector = sectorClass(radii,[minTheta,maxTheta])
 #        self.coneDiagram(thetaVal)
 #        plt.title(self.fieldName)
-        ax = self.coneDiagram(thetaVal,sector,rOrigin=-Zmin, overplot=True)
+        ax = self.coneDiagram(thetaVal,sector,rOrigin=-radii[0], overplot=True)
         plt.title(self.fieldName)
 
         return ax
 
-    def wedgePatch(self, ax, sector):
+    def wedgePatch(self, ax, sector,wedgeLabel=''):
         ##see for explanation: https://stackoverflow.com/a/54400045
 
         ##compute the corner points of the wedge:
@@ -351,18 +352,25 @@ class coneData():
         ##convert to figure cordinates, for a starter
         xax, yax = trans.transform([(t,r) for t,r in zip(ts, rs)]).T
 
-        '''
+
         #adapt this to label the different wedges with emission lines???
-
+        #BSC: label the wedge bounds
         for i,(x,y) in enumerate(zip(xax, yax)):
-            ax.annotate(
-                str(i), (x,y), xytext = (x+0.1, y), xycoords = 'axes fraction',
-                arrowprops = dict(
-                    width=2,
+            #only want to label the third bound point:
+            if i%3 == 0:
+                plt.annotate(wedgeLabel, (x,y),xytext = (x+0.01,y),
+                             xycoords='axes fraction',
+                             bbox=dict(facecolor='white',edgecolor='black')
+                             )
 
-                ),
-            )
-        '''
+                #or do an arrow...
+                '''
+                ax.annotate( wedgeLabel, (x,y), xytext = (x+0.1,y),
+                            xycoords='axes fraction',
+                            arrowprops=dict(width=2,color='lightgray')
+                            )
+                '''
+
 
         ##compute the angles of the wedge:
         tstart = np.rad2deg(angle(*np.array((xax[[0,1,2,3]],yax[[0,1,2,3]])).T))
@@ -380,89 +388,63 @@ class coneData():
                       width=router-rinner,
                       #0.6,tstart,tend,0.3,
                       transform=ax.transAxes, linestyle='--', lw=3,
-                      fill=False, color='red')
+                      fill=False, color='gray')
         ax.add_artist(wedge)
 
 
-    def SFACTplots(self,thetaVal='RA'):
+    def SFACTplots(self,
+                   thetaVal='RA',
+                   plotRadii=[[0.04,0.18],[0.28,0.55],[0.65,1.05]],
+                   sectorRadii=[[0.0521, 0.0658],[0.1298, 0.1435],
+                                [0.3072, 0.3251],[0.3791, 0.3970],
+                                [0.4809, 0.4989],[0.7561, 0.7803],
+                                [0.8527, 0.8768],[0.9895, 1.0137]
+                                ],
+                   sectorLabels=['Ha NB1','Ha NB3',
+                                 'OIII NB2', 'OIII NB1',
+                                 'OIII NB3', 'OII NB2',
+                                 'OII NB1', 'OII NB3'
+                                 ]
+                   ):
+        '''
+        Default redshift windows are:
+            [0.0521, 0.0658]    #Ha NB1
+            [0.1298, 0.1435]    #Ha NB3
+            [0.3072, 0.3251]    #OIII NB2
+            [0.3791, 0.3970]    #OIII NB1
+            [0.4809, 0.4989]    #OIII NB3
+            [0.7561, 0.7803]    #OII NB2
+            [0.8527, 0.8768]    #OII NB1
+            [0.9895, 1.0137]    #OII NB3
+        Maybe do something about the whole dTheta angular size of the cone diagram...
+        I originally adjusted it for each window:
+            [0.04,0.18]    2.0 deg
+            [0.28,0.55]    1.5 deg
+            [0.65,1.05]    0.7 deg
+            [1.30,1.75]    0.5 deg
+        but I now set it to be 2 degrees for all of them. Could this be computed dynamically?
+
         '''
 
-        Maybe someday I'll just let this accept arrays of redshifts,
-        '''
-
-        ##full plot
-        #ax = self.plotWedge(thetaVal,zMin=0,zMax=2)
-
-        ##first window
-        zMin1 = 0.04
-        zMax1 = 0.18
-        dTheta1 = 2      #degrees
-
-        ax = self.plotWedge(thetaVal,zMin1,zMax1,dTheta1)
-
-        #plot wedge patches around the appropriate redshifts and theta ranges
         center = self.getCenter(thetaVal)
         angRange = np.deg2rad([center-0.5, center+0.5])
 
-        radiusDepth1 = [0.0521, 0.0658]    #Ha NB1
-        sector1 = sectorClass(radiusDepth1,angRange)
-        self.wedgePatch(ax,sector1)
-        radiusDepth2 = [0.1298, 0.1435]     #Ha NB3
-        sector2 = sectorClass(radiusDepth2,angRange)
-        self.wedgePatch(ax,sector2)
+        for i in range(len(plotRadii)):
+            plotRads = plotRadii[i]
 
-        ##second window
-        zMin2 = 0.28
-        zMax2 = 0.55
-        dTheta2 = 1.5      #degrees
+            ax = self.plotWedge(thetaVal,plotRads,2)
 
-        ax = self.plotWedge(thetaVal,zMin2,zMax2,dTheta2)
+            for j in range(len(sectorRadii)):
+                sectorRads = sectorRadii[j]
+                #draw only the wedges within the plot, so check the radii bounds
+                if (sectorRads[1] < plotRads[1] and sectorRads[0] > plotRads[0]):
+                    sector = sectorClass(sectorRads,angRange)
+                    self.wedgePatch(ax,sector,sectorLabels[j])
+            figName = self.fieldName + '_' + thetaVal + 'wedge' + str(i+1)
 
-        #wedge patches
-        radiusDepth3 = [0.3072, 0.3571]    #OIII NB2
-        sector3 = sectorClass(radiusDepth3,angRange)
-        self.wedgePatch(ax, sector3)
-        radiusDepth4 = [0.3791, 0.3970]    #OIII NB1
-        sector4 = sectorClass(radiusDepth4,angRange)
-        self.wedgePatch(ax,sector4)
-        radiusDepth5 = [0.4809, 0.4989]    #OIII NB3
-        sector5 = sectorClass(radiusDepth5,angRange)
-        self.wedgePatch(ax,sector5)
+            rez = 400
+            plt.savefig(join(savepath, figName),dpi=rez)
 
-        ##third window
-        zMin3 = 0.65
-        zMax3 = 1.05
-        dTheta3 = 0.7      #degrees
-
-        ax = self.plotWedge(thetaVal,zMin3,zMax3,dTheta3)
-
-        #wedge patches
-        radiusDepth6 = [0.7561, 0.7803]    #OII NB2
-        sector6 = sectorClass(radiusDepth6,angRange)
-        self.wedgePatch(ax, sector6)
-        radiusDepth7 = [0.8527, 0.8768]    #OII NB1
-        sector7 = sectorClass(radiusDepth7,angRange)
-        self.wedgePatch(ax, sector7)
-        radiusDepth8 = [0.9895, 1.0137]    #OII NB3
-        sector8 = sectorClass(radiusDepth8,angRange)
-        self.wedgePatch(ax, sector8)
-
-        ##fourth window
-        zMin4 = 1.3
-        zMax4 = 1.75
-        dTheta4 = 0.5      #degrees
-
-        ax = self.plotWedge(thetaVal,zMin4,zMax4,dTheta4)
-
-
-    def fullRun(self):
-
-        self.loadDatasets()
-        self.cleanDatasets()
-        self.loadCoords()
-
-        self.SFACTplots('RA')
-#        self.SFACTplots('Dec')
 
     def kNN(self, sectorRA, sectorDec ,sourceIdx=[1],targetIdx=[0,2]):
         '''
@@ -480,16 +462,12 @@ class coneData():
         Typically will be used to compute NN for a source & target, and then
         target & target to compare results.
 
-        TODO: allow multiple datasets to be included in the target, so I can
-        find an unbiased/unrestricted sample of neighbors.
-
         '''
 
         zMin, zMax, RAmin, RAmax = sectorRA.getBounds()
         _,_,Decmin,Decmax = sectorDec.getBounds()
 
-        #start off with the first dataset, then concatenante more if they're specified:
-        #sourceData = self.dataCoords[ sourceIdx[0] ]
+        #start off with the first dataset, then concatenate more if they're specified:
         i = 0; j = 0
         for x in sourceIdx:
             if i == 0:
@@ -497,7 +475,6 @@ class coneData():
             else:
                 sourceData = np.concatenate((sourceData,self.dataCoords[x]),axis=1)
             i += 1
-        #targetData = self.dataCoords[ targetIdx[0] ]
         for x in targetIdx:
             if j == 0:
                 targetData = self.dataCoords[x]
@@ -505,8 +482,6 @@ class coneData():
                 targetData = np.concatenate((targetData,self.dataCoords[x]),axis=1)
             j += 1
 
-#        sourceData = np.array( self.dataCoords[sourceIdx] )
-#        targetData = np.array( self.dataCoords[targetIdx] )
         sourceData = sourceData.T
         targetData = targetData.T
 
@@ -524,11 +499,6 @@ class coneData():
         NN_dists = np.zeros(numSource)
         NN_coords = np.zeros([numSource,3])
 
-#        if sourceIdx == targetIdx:
-#            #then, get the 2nd nearest neighbor since the 1st is itself
-#            kIdx = 2
-#        else:
-#            kIdx = 1
         kIdx = 1
 
         for i in range(numSource):
@@ -542,12 +512,12 @@ class coneData():
                 NN_dist, NN_idx = targetTree.query(curCoord,k=[kIdx+1])
 
             NN_coord = np.squeeze( targetData[NN_idx] )
-            NN_dists[i] = self.NNdist(curCoord,NN_coord)
+            NN_dists[i] = self.skyDist(curCoord,NN_coord)
             NN_coords[i] = NN_coord
 
         return NN_dists,NN_coords
 
-    def NNdist(self, coord1,coord2):
+    def skyDist(self, coord1,coord2):
 
         RA1,Dec1,z1 = coord1
         RA2,Dec2,z2 = coord2
@@ -570,37 +540,10 @@ class coneData():
 
         return np.array(dist)
 
-    def NNdist_astropy(self,coord1,coord2):
-        '''
-        I am dubious of astropy's precision with redshifts & distances, so this
-        is just here for bookkeeping but not for a use.
-        '''
-
-        RA1,Dec1,z1 = coord1
-        RA2,Dec2,z2 = coord2
-
-        dist1 = Distance(z = z1, cosmology = Planck15)
-        dist2 = Distance(z = z2, cosmology = Planck15)
-
-        skycoord1 = SkyCoord(ra=RA1*u.rad, dec=Dec1*u.rad, distance=dist1)
-        skycoord2 = SkyCoord(ra=RA2*u.rad, dec=Dec2*u.rad, distance=dist2)
-
-        #do a comparison between me and astropy, where only the z and Dec are different btwn points:
-        #dist2 = skycoord1.separation_3d( SkyCoord(ra=RA1*u.rad,dec=Dec2*u.rad, distance=dist2)  )
-        dist2 = skycoord1.separation_3d(skycoord2)   #distance btwn real points
-
-        #then my method:
-        alpha = Dec1 - Dec2
-        d2 = (z1+z2)**2 * (np.sin(alpha/2.))**2 + (z2-z1)**2 * (np.cos(alpha/2.))**2
-
-        c_kmPerSec = c.to('km/s')
-        H0 = Planck15.H0
-
-        dist1 = np.sqrt(d2)*c_kmPerSec/H0   #Mpc
-
-        return dist1-dist2
-
-    def ELG_NN(self):
+    def runNN(self,
+               radii=[[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]],
+               sourceIdx=[1],targetIdx=[0,2]
+               ):
         '''
 
         '''
@@ -610,83 +553,77 @@ class coneData():
         angRangeRA = np.deg2rad([centerRA-0.5, centerRA+0.5])
         angRangeDec = np.deg2rad([centerDec-0.5, centerDec+0.5])
 
-#        radiusDepth = [0.0521, 0.0658]    #Ha NB1
-#        radiusDepth = [0.1298, 0.1435]     #Ha NB3
-#        radiusDepth = [0.3072, 0.3251]    #OIII NB2
-#        radiusDepth = [0.3791, 0.3970]    #OIII NB1
-#        radiusDepth = [0.4809, 0.4989]    #OIII NB3
-#        radiusDepth = [0.8527, 0.8768]    #OII NB1
+        radii = np.array(radii)
 
-        radii = np.array([[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]])
-
-        for x in radii:
+        for i in range(len(radii)):
+            x = radii[i]
             sectorRA = sectorClass(x,angRangeRA)
             sectorDec = sectorClass(x,angRangeDec)
 
-            NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[1],targetIdx=[0,2])
+            NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=sourceIdx,targetIdx=targetIdx)
             #NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[1],targetIdx=[0,1,2])
 
+            #set up histogram
             plt.figure()
-            plt.hist(NN_dists,30)
+
+            dMax = 100 #Mpc
+            binWidth = 1
+            bins = np.arange(0,dMax,binWidth)
+
+            plt.hist(NN_dists,bins=bins)
+
+            #scale x-axis to be smaller relevant distances, but still include
+            #plots that go beyond this range
+            dMin = 26   #Mpc
+            if (len(NN_dists) != 0) and (np.min(NN_dists) <= dMin):
+                plt.xlim([0,dMin])
+
             plt.xlabel('distance (Mpc)')
             plt.ylabel('number')
-            plt.title('NN-test for ELGs-Background Galaxies between redshifts: ' +str(x))
+
+            if sourceIdx==targetIdx:
+                title = 'NN for Background-Background Galaxies between redshifts: ' +str(x)
+                figName = self.fieldName + '_BG_NN' + str(i+1)
+            else:
+                title = 'NN for ELG-Background Galaxies between redshifts: ' +str(x)
+                figName = self.fieldName + '_ELG_NN' + str(i+1)
+
+            plt.title(title)
+            plt.savefig(join(savepath, figName),dpi=200)
+
         return NN_dists,NN_coords
 
-    def background_NN(self):
-        '''
 
-        '''
-        centerRA = self.getCenter('RA')
-        centerDec = self.getCenter('Dec')
+    def fullRun(self):
 
-        angRangeRA = np.deg2rad([centerRA-0.5, centerRA+0.5])
-        angRangeDec = np.deg2rad([centerDec-0.5, centerDec+0.5])
+        self.loadDatasets()
+        self.cleanDatasets()
+        self.loadCoords()
 
-#        radiusDepth = [0.3072, 0.3251]    #OIII NB2
-#        radiusDepth = [0.3791, 0.3970]    #OIII NB1
-#        radiusDepth = [0.4809, 0.4989]    #OIII NB3
-#        radiusDepth = [0.8527, 0.8768]    #OII NB1
-        radii = np.array([[0.4809, 0.4989]])
-#        radii = np.array([[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]])
-
-        for x in radii:
-            sectorRA = sectorClass(x,angRangeRA)
-            sectorDec = sectorClass(x,angRangeDec)
-
-            NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[0,2],targetIdx=[0,2])
-            plt.figure()
-            plt.hist(NN_dists,30)
-            plt.xlabel('distance (Mpc)')
-            plt.ylabel('number')
-            plt.title('NN-test for Background-Background Galaxies between redshifts: ' +str(x))
-        return NN_dists,NN_coords
-
+        self.SFACTplots('RA')
+#        self.SFACTplots('Dec')
 
 
 datapath = '/home/bscousin/AstroResearch/thesis/data'
 fname55 = 'hadot055_sfact.dat'
-fname55_2 = 'HADot055_redshiftsSWB.txt'
+#fname55_2 = 'HADot055_redshiftsSWB.txt'
+fname55_2 = 'HADot055_redshiftsSWB_030919.txt'
 fname55_SDSS = 'hadot055_SDSS_5deg.csv'
 
 cone55 = coneData(datapath,[fname55_SDSS,fname55,fname55_2],'HaDot55',fieldCenter=[26.16670584,27.90981659])
 cone55.fullRun()
-#cone55.SFACTplots()
-NN_dists55,NN_coords55 = cone55.background_NN()
+#NN_ELGdists55,NN_ELGcoords55 = cone55.runNN(sourceIdx=[1],targetIdx=[0,2])
+#NN_BGdists55,NN_BGcoords55 = cone55.runNN(sourceIdx=[0,2],targetIdx=[0,2])
+
+#NN_ELGdists55,NN_ELGcoords55 = cone55.runNN(radii=[[0.3791,0.397]],sourceIdx=[1],targetIdx=[0,2])
 
 fname22 = 'hadot022_sfact.dat'
-fname22_2 = 'HADot022_redshiftsSWB.txt'
+fname22_2 = 'HADot022_redshiftsSWB_030919.txt'
 fname22_SDSS = 'hadot022_SDSS_5deg.csv'
 
 cone22 = coneData(datapath,[fname22_SDSS,fname22,fname22_2],'HaDot22',fieldCenter=[39.80166399,	27.86709320])
 #cone22.fullRun()
-#cone22.SFACTplots()
-#NN_dists22,NN_coords22 = cone22.background_NN()
 
+#NN_ELGdists22,NN_ELGcoords22 = cone22.runNN(sourceIdx=[1],targetIdx=[0,2])
+#NN_BGdists22,NN_BGcoords22 = cone22.runNN(sourceIdx=[0,2],targetIdx=[0,2])
 
-#NN_dists22, NN_coords22 = cone22.kNN()
-#NN_dists22_self, NN_coords22_self = cone22.kNN(sourceIdx=2,targetIdx=2)
-
-
-#coord1 = sourceData[-1]
-#coord2 = NN_coords22[-1]
