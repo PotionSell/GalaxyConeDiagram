@@ -24,7 +24,7 @@ from scipy.spatial import cKDTree
 
 from os.path import splitext, join
 
-savepath = '/home/bscousin/code/figures'
+savepath = '/home/bscousin/OneDrive/MiscCollege/AstroResearch/thesis/figures'
 
 def transformRadius(r, rMin, rMax):
     '''
@@ -604,7 +604,8 @@ class coneData():
 #        self.SFACTplots('Dec')
 
 
-datapath = '/home/bscousin/AstroResearch/thesis/data'
+#datapath = '/home/bscousin/AstroResearch/thesis/data'
+datapath = '~/OneDrive/MiscCollege/AstroResearch/thesis/data'
 fname55 = 'hadot055_sfact.dat'
 #fname55_2 = 'HADot055_redshiftsSWB.txt'
 fname55_2 = 'HADot055_redshiftsSWB_030919.txt'
