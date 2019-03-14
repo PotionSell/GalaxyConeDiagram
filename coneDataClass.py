@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Feb  2 15:46:04 2019
+Created on Fri Mar  1 19:40:58 2019
 
 @author: bscousin
-
-BACKUP BEFORE MOVING TO A "SECTOR" CLASS FOR ALL MY PREVIOUSLY-CONVOLUTED USAGE OF SECTORS
+BACKUP BEFORE I RETOOLED A LOT OF THE PLOTTING FUNCTIONS AND HOW REDSHIFT
+WINDOW RADII ARE HANDLED. THIS VERSION HAS CORRECT NN COMPUTATIONS, BUT IS A
+BIT MESSY. NEXT VERSION IS CLEANER.
 """
+
 
 import pandas as pd
 import numpy as np
@@ -83,6 +85,20 @@ def angle(a1, a2, b1, b2):
 ###########################################################################
 
 
+class sectorClass():
+
+    def __init__(self,radii=[None,None],thetas=[None,None]):
+        '''
+        Create a sector for easy referencing (e.g., creating a wedge sector
+        plot patch, selecting a region of data, etc.)
+        '''
+        self.rMin = radii[0]
+        self.rMax = radii[1]
+        self.tMin = thetas[0]
+        self.tMax = thetas[1]
+
+    def getBounds(self):
+        return self.rMin,self.rMax,self.tMin,self.tMax
 
 
 class coneData():
@@ -233,10 +249,10 @@ class coneData():
             RAs = self.angleConv(RAs,dataFormat)
             DECs = self.angleConv(DECs,dataFormat)
 
-            self.dataCoords[i] = (RAs,DECs,Zs)
+            self.dataCoords[i] = np.array((RAs,DECs,Zs))
 
 
-    def coneDiagram(self, thetaVal='RA', minTheta=None, maxTheta=None, minZ=0, maxZ=2, rOrigin=0, overplot=False):
+    def coneDiagram(self, thetaVal='RA', sector=sectorClass(), rOrigin=0, overplot=False):
 
         colors = ['k','g','b','r']
         markers = ['o','*','*','*']
@@ -260,21 +276,23 @@ class coneData():
             #note: this is NOT plotting each point individually; this plots
             #each dataset individually
 
+        zMin,zMax,tMin,tMax = sector.getBounds()
+
         #ax.set_rmax(maxZ)
         #ax.set_rmin(minZ)
-        ax.set_ylim([minZ,maxZ])
+        ax.set_ylim([zMin,zMax])
         ax.set_rorigin(rOrigin)
 
-        #set RA limits to be scaled from the dataset's own limits
+        #set theta limits to be scaled from the dataset's own limits
         #note: this will be from the SDSS dataset since it has the largest range
-        if minTheta is None:
-            minTheta = 0.9*min(thetaRad)
+        if tMin is None:
+            tMin = 0.9*min(thetaRad)
 
-        if maxTheta is None:
-            maxTheta = 1.1*max(thetaRad)
-            if maxTheta > 2*np.pi: maxTheta = 2*np.pi
+        if tMax is None:
+            tMax = 1.1*max(thetaRad)
+            if tMax > 2*np.pi: tMax = 2*np.pi
 
-        ticks = np.linspace(minTheta, maxTheta, 4)
+        ticks = np.linspace(tMin, tMax, 4)
         ax.set_xticks(ticks)
 
         #convert to decimal precision
@@ -282,8 +300,8 @@ class coneData():
 
         #you must call these AFTER setting the ticks, since setting the ticks
         #actually adjusts the theta range window
-        ax.set_thetamin(np.rad2deg(minTheta))
-        ax.set_thetamax(np.rad2deg(maxTheta))
+        ax.set_thetamin(np.rad2deg(tMin))
+        ax.set_thetamax(np.rad2deg(tMax))
 
         ax.set_xlabel('redshift',size=14)
         ax.set_ylabel(thetaVal,size=14)
@@ -305,25 +323,21 @@ class coneData():
         minTheta = np.deg2rad( center - dTheta )
         maxTheta = np.deg2rad( center + dTheta )
 
+        sector = sectorClass([Zmin,Zmax],[minTheta,maxTheta])
 #        self.coneDiagram(thetaVal)
 #        plt.title(self.fieldName)
-        ax = self.coneDiagram(thetaVal, minZ=Zmin,maxZ=Zmax,rOrigin=-Zmin, minTheta=minTheta,maxTheta=maxTheta, overplot=True)
+        ax = self.coneDiagram(thetaVal,sector,rOrigin=-Zmin, overplot=True)
         plt.title(self.fieldName)
 
         return ax
 
-    def wedgePatch(self,
-        ax, r_min = 0.3, r_max = 0.5, t_min = np.pi/4, t_max = 3*np.pi/4
-        ):
+    def wedgePatch(self, ax, sector):
         ##see for explanation: https://stackoverflow.com/a/54400045
-
-        ##some data
-        #R = np.random.rand(100)*(r_max-r_min)+r_min
-        #T = np.random.rand(100)*(t_max-t_min)+t_min
-        #ax.scatter(T,R)
 
         ##compute the corner points of the wedge:
         axtmin = 0
+
+        r_min,r_max,t_min,t_max = sector.getBounds()
 
         rs = np.array([r_min,  r_max,  r_min, r_max, r_min, r_max])
         ts = np.array([axtmin, axtmin, t_min, t_min, t_max, t_max])
@@ -338,6 +352,8 @@ class coneData():
         xax, yax = trans.transform([(t,r) for t,r in zip(ts, rs)]).T
 
         '''
+        #adapt this to label the different wedges with emission lines???
+
         for i,(x,y) in enumerate(zip(xax, yax)):
             ax.annotate(
                 str(i), (x,y), xytext = (x+0.1, y), xycoords = 'axes fraction',
@@ -369,68 +385,74 @@ class coneData():
 
 
     def SFACTplots(self,thetaVal='RA'):
+        '''
+
+        Maybe someday I'll just let this accept arrays of redshifts,
+        '''
 
         ##full plot
-        #ax = self.plotWedge(thetaVal,Zmin=0,Zmax=2)
+        #ax = self.plotWedge(thetaVal,zMin=0,zMax=2)
 
         ##first window
-        plot1radii = [0.04, 0.18]
-        #Zmin1 = 0.04
-        #Zmax1 = 0.18
+        zMin1 = 0.04
+        zMax1 = 0.18
         dTheta1 = 2      #degrees
 
-        ax = self.plotWedge(thetaVal,plot1radii[0],plot1radii[1],dTheta1)
+        ax = self.plotWedge(thetaVal,zMin1,zMax1,dTheta1)
 
-        #plot wedge patches around the appropriate redshifts
+        #plot wedge patches around the appropriate redshifts and theta ranges
         center = self.getCenter(thetaVal)
-
-        radiusDepth = [0.0521, 0.0658]    #Ha NB1
         angRange = np.deg2rad([center-0.5, center+0.5])
 
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-
-        radiusDepth = [0.1298, 0.1435]     #Ha NB3
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-
+        radiusDepth1 = [0.0521, 0.0658]    #Ha NB1
+        sector1 = sectorClass(radiusDepth1,angRange)
+        self.wedgePatch(ax,sector1)
+        radiusDepth2 = [0.1298, 0.1435]     #Ha NB3
+        sector2 = sectorClass(radiusDepth2,angRange)
+        self.wedgePatch(ax,sector2)
 
         ##second window
-        Zmin2 = 0.28
-        Zmax2 = 0.55
+        zMin2 = 0.28
+        zMax2 = 0.55
         dTheta2 = 1.5      #degrees
 
-        ax = self.plotWedge(thetaVal,Zmin2,Zmax2,dTheta2)
+        ax = self.plotWedge(thetaVal,zMin2,zMax2,dTheta2)
 
         #wedge patches
-        radiusDepth = [0.3072, 0.3571]    #OIII NB2
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-        radiusDepth = [0.3791, 0.3970]    #OIII NB1
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-        radiusDepth = [0.4809, 0.4989]    #OIII NB3
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-
+        radiusDepth3 = [0.3072, 0.3571]    #OIII NB2
+        sector3 = sectorClass(radiusDepth3,angRange)
+        self.wedgePatch(ax, sector3)
+        radiusDepth4 = [0.3791, 0.3970]    #OIII NB1
+        sector4 = sectorClass(radiusDepth4,angRange)
+        self.wedgePatch(ax,sector4)
+        radiusDepth5 = [0.4809, 0.4989]    #OIII NB3
+        sector5 = sectorClass(radiusDepth5,angRange)
+        self.wedgePatch(ax,sector5)
 
         ##third window
-        Zmin3 = 0.65
-        Zmax3 = 1.05
+        zMin3 = 0.65
+        zMax3 = 1.05
         dTheta3 = 0.7      #degrees
 
-        ax = self.plotWedge(thetaVal,Zmin3,Zmax3,dTheta3)
+        ax = self.plotWedge(thetaVal,zMin3,zMax3,dTheta3)
 
         #wedge patches
-        radiusDepth = [0.7561, 0.7803]    #OII NB2
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-        radiusDepth = [0.8527, 0.8768]    #OII NB1
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-        radiusDepth = [0.9895, 1.0137]    #OII NB3
-        self.wedgePatch(ax, radiusDepth[0],radiusDepth[1], angRange[0],angRange[1])
-
+        radiusDepth6 = [0.7561, 0.7803]    #OII NB2
+        sector6 = sectorClass(radiusDepth6,angRange)
+        self.wedgePatch(ax, sector6)
+        radiusDepth7 = [0.8527, 0.8768]    #OII NB1
+        sector7 = sectorClass(radiusDepth7,angRange)
+        self.wedgePatch(ax, sector7)
+        radiusDepth8 = [0.9895, 1.0137]    #OII NB3
+        sector8 = sectorClass(radiusDepth8,angRange)
+        self.wedgePatch(ax, sector8)
 
         ##fourth window
-        Zmin4 = 1.3
-        Zmax4 = 1.75
+        zMin4 = 1.3
+        zMax4 = 1.75
         dTheta4 = 0.5      #degrees
 
-        ax = self.plotWedge(thetaVal,Zmin4,Zmax4,dTheta4)
+        ax = self.plotWedge(thetaVal,zMin4,zMax4,dTheta4)
 
 
     def fullRun(self):
@@ -442,7 +464,7 @@ class coneData():
         self.SFACTplots('RA')
 #        self.SFACTplots('Dec')
 
-    def kNN(self, sourceIdx=1,targetIdx=2, zMin, zMax, RAmin, RAmax, Decmin, Decmax):
+    def kNN(self, sectorRA, sectorDec ,sourceIdx=[1],targetIdx=[0,2]):
         '''
         ?
         Finds the nearest neighbor for sources within a dataset to targets within
@@ -463,36 +485,61 @@ class coneData():
 
         '''
 
-        sourceData = np.array( self.dataCoords[sourceIdx] ).T
-        targetData = np.array( self.dataCoords[targetIdx] ).T
+        zMin, zMax, RAmin, RAmax = sectorRA.getBounds()
+        _,_,Decmin,Decmax = sectorDec.getBounds()
+
+        #start off with the first dataset, then concatenante more if they're specified:
+        #sourceData = self.dataCoords[ sourceIdx[0] ]
+        i = 0; j = 0
+        for x in sourceIdx:
+            if i == 0:
+                sourceData = self.dataCoords[x]
+            else:
+                sourceData = np.concatenate((sourceData,self.dataCoords[x]),axis=1)
+            i += 1
+        #targetData = self.dataCoords[ targetIdx[0] ]
+        for x in targetIdx:
+            if j == 0:
+                targetData = self.dataCoords[x]
+            else:
+                targetData = np.concatenate((targetData,self.dataCoords[x]),axis=1)
+            j += 1
+
+#        sourceData = np.array( self.dataCoords[sourceIdx] )
+#        targetData = np.array( self.dataCoords[targetIdx] )
+        sourceData = sourceData.T
+        targetData = targetData.T
 
         #trim the source & target data to consider only the desired sector:
-        sourceDataTrim = sourceData[ (sourceData[:,2] > zMin) & (sourceData[:,2] < zMax) ] #redshift
-        sourceDataTrim = sourceDataTrim[ (sourceDataTrim[:,0] > RAmin) & (sourceDataTrim[:,0] > RAmax) ] #RA
-        sourceDataTrim = sourceDataTrim[ (sourceDataTrim[:,1] > Decmin) & (sourceDataTrim[:,1] > Decmax) ] #Dec
+        idx1 = (sourceData[:,2] > zMin) & (sourceData[:,2] < zMax)        #redshift
+        idx2 = (sourceData[:,0] > RAmin) & (sourceData[:,0] < RAmax)      #RA
+        idx3 = (sourceData[:,1] > Decmin) & (sourceData[:,1] < Decmax)    #Dec
 
+        sourceDataTrim = sourceData[idx1 & idx2 & idx3]
 
-
-
-
-
-        numSource = len(sourceData)
+        numSource = len(sourceDataTrim)
 
         targetTree = cKDTree(targetData)
 
         NN_dists = np.zeros(numSource)
         NN_coords = np.zeros([numSource,3])
 
-        if sourceIdx == targetIdx:
-            #then, get the 2nd nearest neighbor since the 1st is itself
-            kIdx = 2
-        else:
-            kIdx = 1
+#        if sourceIdx == targetIdx:
+#            #then, get the 2nd nearest neighbor since the 1st is itself
+#            kIdx = 2
+#        else:
+#            kIdx = 1
+        kIdx = 1
 
-        for i in range(len(sourceData)):
-            curCoord = sourceData[i]
+        for i in range(numSource):
+            curCoord = sourceDataTrim[i]
 
             NN_dist, NN_idx = targetTree.query(curCoord,k=[kIdx])
+
+            #the distance will be zero if a point is in both source & target sets
+            if NN_dist == 0:
+                #so, get the 2nd NN since the 1st NN is itself
+                NN_dist, NN_idx = targetTree.query(curCoord,k=[kIdx+1])
 
             NN_coord = np.squeeze( targetData[NN_idx] )
             NN_dists[i] = self.NNdist(curCoord,NN_coord)
@@ -502,10 +549,8 @@ class coneData():
 
     def NNdist(self, coord1,coord2):
 
-
         RA1,Dec1,z1 = coord1
         RA2,Dec2,z2 = coord2
-
 
         #use AstroPy to get the angular distance between the points, and then
         #do the full distance computation myself due to Astropy's precision issues
@@ -528,7 +573,7 @@ class coneData():
     def NNdist_astropy(self,coord1,coord2):
         '''
         I am dubious of astropy's precision with redshifts & distances, so this
-        is just here for posterity but not for a use.
+        is just here for bookkeeping but not for a use.
         '''
 
         RA1,Dec1,z1 = coord1
@@ -555,6 +600,69 @@ class coneData():
 
         return dist1-dist2
 
+    def ELG_NN(self):
+        '''
+
+        '''
+        centerRA = self.getCenter('RA')
+        centerDec = self.getCenter('Dec')
+
+        angRangeRA = np.deg2rad([centerRA-0.5, centerRA+0.5])
+        angRangeDec = np.deg2rad([centerDec-0.5, centerDec+0.5])
+
+#        radiusDepth = [0.0521, 0.0658]    #Ha NB1
+#        radiusDepth = [0.1298, 0.1435]     #Ha NB3
+#        radiusDepth = [0.3072, 0.3251]    #OIII NB2
+#        radiusDepth = [0.3791, 0.3970]    #OIII NB1
+#        radiusDepth = [0.4809, 0.4989]    #OIII NB3
+#        radiusDepth = [0.8527, 0.8768]    #OII NB1
+
+        radii = np.array([[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]])
+
+        for x in radii:
+            sectorRA = sectorClass(x,angRangeRA)
+            sectorDec = sectorClass(x,angRangeDec)
+
+            NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[1],targetIdx=[0,2])
+            #NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[1],targetIdx=[0,1,2])
+
+            plt.figure()
+            plt.hist(NN_dists,30)
+            plt.xlabel('distance (Mpc)')
+            plt.ylabel('number')
+            plt.title('NN-test for ELGs-Background Galaxies between redshifts: ' +str(x))
+        return NN_dists,NN_coords
+
+    def background_NN(self):
+        '''
+
+        '''
+        centerRA = self.getCenter('RA')
+        centerDec = self.getCenter('Dec')
+
+        angRangeRA = np.deg2rad([centerRA-0.5, centerRA+0.5])
+        angRangeDec = np.deg2rad([centerDec-0.5, centerDec+0.5])
+
+#        radiusDepth = [0.3072, 0.3251]    #OIII NB2
+#        radiusDepth = [0.3791, 0.3970]    #OIII NB1
+#        radiusDepth = [0.4809, 0.4989]    #OIII NB3
+#        radiusDepth = [0.8527, 0.8768]    #OII NB1
+        radii = np.array([[0.4809, 0.4989]])
+#        radii = np.array([[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]])
+
+        for x in radii:
+            sectorRA = sectorClass(x,angRangeRA)
+            sectorDec = sectorClass(x,angRangeDec)
+
+            NN_dists,NN_coords = self.kNN(sectorRA,sectorDec,sourceIdx=[0,2],targetIdx=[0,2])
+            plt.figure()
+            plt.hist(NN_dists,30)
+            plt.xlabel('distance (Mpc)')
+            plt.ylabel('number')
+            plt.title('NN-test for Background-Background Galaxies between redshifts: ' +str(x))
+        return NN_dists,NN_coords
+
+
 
 datapath = '/home/bscousin/AstroResearch/thesis/data'
 fname55 = 'hadot055_sfact.dat'
@@ -562,30 +670,23 @@ fname55_2 = 'HADot055_redshiftsSWB.txt'
 fname55_SDSS = 'hadot055_SDSS_5deg.csv'
 
 cone55 = coneData(datapath,[fname55_SDSS,fname55,fname55_2],'HaDot55',fieldCenter=[26.16670584,27.90981659])
-#cone55.fullRun()
+cone55.fullRun()
 #cone55.SFACTplots()
-
+NN_dists55,NN_coords55 = cone55.background_NN()
 
 fname22 = 'hadot022_sfact.dat'
 fname22_2 = 'HADot022_redshiftsSWB.txt'
 fname22_SDSS = 'hadot022_SDSS_5deg.csv'
 
 cone22 = coneData(datapath,[fname22_SDSS,fname22,fname22_2],'HaDot22',fieldCenter=[39.80166399,	27.86709320])
-cone22.fullRun()
+#cone22.fullRun()
 #cone22.SFACTplots()
+#NN_dists22,NN_coords22 = cone22.background_NN()
 
 
-#test the NN stuff
-sourceIdx=1; targetIdx=2
-sourceData = np.array( cone22.dataCoords[sourceIdx] ).T
-targetData = np.array( cone22.dataCoords[targetIdx] ).T
-
-
-NN_dists22, NN_coords22 = cone22.kNN()
+#NN_dists22, NN_coords22 = cone22.kNN()
 #NN_dists22_self, NN_coords22_self = cone22.kNN(sourceIdx=2,targetIdx=2)
 
 
-
-
-coord1 = sourceData[-1]
-coord2 = NN_coords22[-1]
+#coord1 = sourceData[-1]
+#coord2 = NN_coords22[-1]
