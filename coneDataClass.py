@@ -254,7 +254,8 @@ class coneData():
 
         colors = ['k','g','b','r']
         markers = ['o','*','*','*']
-        sizes = [2,8,8,8]
+        #sizes = [2,8,8,8]
+        sizes = [16,40,40,40]
 
         fig = plt.figure(figsize=(12,13))
         ax = fig.add_subplot(111, projection='polar')
@@ -276,8 +277,6 @@ class coneData():
 
         zMin,zMax,tMin,tMax = sector.getBounds()
 
-        #ax.set_rmax(maxZ)
-        #ax.set_rmin(minZ)
         ax.set_ylim([zMin,zMax])
         ax.set_rorigin(rOrigin)
 
@@ -301,19 +300,22 @@ class coneData():
         ax.set_thetamin(np.rad2deg(tMin))
         ax.set_thetamax(np.rad2deg(tMax))
 
-        ax.set_xlabel('redshift', rotation=tMin,size=14)
+#        ax.set_xlabel('redshift', rotation=tMin,size=14)
+        ax.set_xlabel('redshift', rotation=tMin,size=20)
 
         rPos = transformRadius(zMax,zMin,zMax)
 
-        ax.set_ylabel(thetaVal, rotation=tMin-90,size=14)
+#        ax.set_ylabel(thetaVal, rotation=tMin-90,size=14)
+        ax.set_ylabel(thetaVal, rotation=tMin-90,size=20)
 
-        ax.tick_params('both',labelsize=10.25)
+#        ax.tick_params('both',labelsize=10.25)
+        ax.tick_params('both',labelsize=16)
         #ax.xaxis.grid(False)
 
         return ax
 
 
-    def plotWedge(self,thetaVal,radii=[0,2],dTheta=2):
+    def plotWedge(self,thetaVal='RA',radii=[0,1],dTheta=2):
 
         if thetaVal == 'RA':
             center = self.fieldCenter[0]
@@ -325,10 +327,9 @@ class coneData():
         maxTheta = np.deg2rad( center + dTheta )
 
         sector = sectorClass(radii,[minTheta,maxTheta])
-#        self.coneDiagram(thetaVal)
-#        plt.title(self.fieldName)
+
         ax = self.coneDiagram(thetaVal,sector,rOrigin=-radii[0], overplot=True)
-        plt.title(self.fieldName)
+#        plt.title(self.fieldName)
 
         return ax
 
@@ -359,6 +360,7 @@ class coneData():
             #only want to label the third bound point:
             if i%3 == 0:
                 plt.annotate(wedgeLabel, (x,y),xytext = (x+0.01,y),
+                             size=16,
                              xycoords='axes fraction',
                              bbox=dict(facecolor='white',edgecolor='black')
                              )
@@ -582,17 +584,81 @@ class coneData():
             plt.ylabel('number')
 
             if sourceIdx==targetIdx:
-                title = 'NN for Background-Background Galaxies between redshifts: ' +str(x)
+                titleStr = 'NN for Background-Background Galaxies between redshifts: ' +str(x)
                 figName = self.fieldName + '_BG_NN' + str(i+1)
             else:
-                title = 'NN for ELG-Background Galaxies between redshifts: ' +str(x)
+                titleStr = 'NN for ELG-Background Galaxies between redshifts: ' +str(x)
                 figName = self.fieldName + '_ELG_NN' + str(i+1)
 
-            plt.title(title)
+            plt.title(titleStr)
             plt.savefig(join(savepath, figName),dpi=200)
 
         return NN_dists,NN_coords
 
+
+    def runBothNN(self,
+               radii=[[0.0521, 0.0658],[0.1298, 0.1435],[0.3072, 0.3251],[0.3791, 0.3970],[0.4809, 0.4989],[0.8527, 0.8768]],
+               sourceIdx=[1],targetIdx=[0,2]
+               ):
+        '''
+
+        '''
+        centerRA = self.getCenter('RA')
+        centerDec = self.getCenter('Dec')
+
+        angRangeRA = np.deg2rad([centerRA-0.5, centerRA+0.5])
+        angRangeDec = np.deg2rad([centerDec-0.5, centerDec+0.5])
+
+        radii = np.array(radii)
+
+        for i in range(len(radii)):
+            x = radii[i]
+            sectorRA = sectorClass(x,angRangeRA)
+            sectorDec = sectorClass(x,angRangeDec)
+
+            NN_dists1,NN_coords1 = self.kNN(sectorRA,sectorDec,sourceIdx=sourceIdx,targetIdx=targetIdx)
+            NN_dists2,NN_coords2 = self.kNN(sectorRA,sectorDec,sourceIdx=targetIdx,targetIdx=targetIdx)
+
+            n1 = len(NN_dists1)
+            n2 = len(NN_dists2)
+
+            #set up histogram
+            plt.figure()
+
+            dMax = 100 #Mpc
+            binWidth = 1
+            bins = np.arange(0,dMax,binWidth)
+
+            plt.hold(True)
+            plt.hist(NN_dists1,bins=bins,stacked=True,density=True, alpha=0.5, edgecolor='k',hatch='/',fill=True, label='ELG-background (count: ' +str(n1)+ ')' )
+            plt.hist(NN_dists2,bins=bins,stacked=True,density=True, alpha=0.3, color='grey', edgecolor='grey',hatch='\\', fill=True,label='background-background (count: ' +str(n2)+ ')' )
+
+            titleStr = self.fieldName + ' nearest neighbors for redshift range ' +str(x)
+            figName = self.fieldName + '_NN' +str(i+1)
+
+            #scale x-axis to be smaller relevant distances, but still include
+            #plots that go beyond this range
+            dMin = 26   #Mpc
+            if (len(NN_dists1) != 0) and (np.min(NN_dists1) <= dMin):
+                plt.xlim([0,dMin])
+
+            plt.xlabel('distance (Mpc)')
+            plt.ylabel('normalized count')
+
+            '''
+            if sourceIdx==targetIdx:
+                titleStr = 'NN for Background-Background Galaxies between redshifts: ' +str(x)
+                figName = self.fieldName + '_BG_NN' + str(i+1)
+            else:
+                titleStr = 'NN for ELG-Background Galaxies between redshifts: ' +str(x)
+                figName = self.fieldName + '_ELG_NN' + str(i+1)
+            '''
+
+            plt.title(titleStr)
+            plt.legend()
+            plt.savefig(join(savepath, figName),dpi=200)
+
+        return NN_dists1,NN_coords1
 
     def fullRun(self):
 
@@ -600,7 +666,7 @@ class coneData():
         self.cleanDatasets()
         self.loadCoords()
 
-        self.SFACTplots('RA')
+#        self.SFACTplots('RA')
 #        self.SFACTplots('Dec')
 
 
@@ -613,6 +679,19 @@ fname55_SDSS = 'hadot055_SDSS_5deg.csv'
 
 cone55 = coneData(datapath,[fname55_SDSS,fname55,fname55_2],'HaDot55',fieldCenter=[26.16670584,27.90981659])
 cone55.fullRun()
+
+'''
+                   sectorRadii=[[0.0521, 0.0658],[0.1298, 0.1435],
+                                [0.3072, 0.3251],[0.3791, 0.3970],
+                                [0.4809, 0.4989],[0.7561, 0.7803],
+                                [0.8527, 0.8768],[0.9895, 1.0137]
+'''
+
+#cone55.SFACTplots(plotRadii=[[0.05,0.07],[0.12, 0.155],[0.35, 0.42],[0.46, 0.52]])
+#cone55.plotWedge(radii=[0,1])
+
+NN_dists55,NN_coords55 = cone55.runBothNN(sourceIdx=[1],targetIdx=[0,2])
+
 #NN_ELGdists55,NN_ELGcoords55 = cone55.runNN(sourceIdx=[1],targetIdx=[0,2])
 #NN_BGdists55,NN_BGcoords55 = cone55.runNN(sourceIdx=[0,2],targetIdx=[0,2])
 
@@ -623,7 +702,9 @@ fname22_2 = 'HADot022_redshiftsSWB_030919.txt'
 fname22_SDSS = 'hadot022_SDSS_5deg.csv'
 
 cone22 = coneData(datapath,[fname22_SDSS,fname22,fname22_2],'HaDot22',fieldCenter=[39.80166399,	27.86709320])
-#cone22.fullRun()
+cone22.fullRun()
+
+#cone22.SFACTplots(plotRadii=[[0.28,0.35],[0.05,0.07]])
 
 #NN_ELGdists22,NN_ELGcoords22 = cone22.runNN(sourceIdx=[1],targetIdx=[0,2])
 #NN_BGdists22,NN_BGcoords22 = cone22.runNN(sourceIdx=[0,2],targetIdx=[0,2])
